@@ -5,7 +5,7 @@ int main()
     printf("I WILL MAKE YOU ENTER ODD NUMBER...\n");
     while (1 == 1)
     {
-        printf("Enter a\n");
+        printf("Enter a number\n");
         scanf("%d", &a);
         if (a % 2 != 0)
         {
