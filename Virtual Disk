@@ -1,0 +1,177 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define METADATA_SIZE 1024
+#define METADATA_ENTRY_SIZE 28
+#define DISK_SIZE (1024 * 1024) // 1 MB
+
+typedef struct {
+    char name[20];
+    unsigned int size;
+    unsigned int start;
+} MetadataEntry;
+
+void initialize_metadata(const char* disk_name) {
+    FILE* disk = fopen(disk_name, "r+b");
+    char zero_buffer[METADATA_SIZE] = {0};
+    fwrite(zero_buffer, sizeof(char), METADATA_SIZE, disk);
+    fclose(disk);
+}
+
+void read_metadata(const char* disk_name, char* buffer) {
+    FILE* disk = fopen(disk_name, "rb");
+    fread(buffer, sizeof(char), METADATA_SIZE, disk);
+    fclose(disk);
+}
+
+void write_metadata(const char* disk_name, const char* buffer) {
+    FILE* disk = fopen(disk_name, "r+b");
+    fwrite(buffer, sizeof(char), METADATA_SIZE, disk);
+    fclose(disk);
+}
+
+void list_files(const char* disk_name) {
+    char metadata[METADATA_SIZE];
+    read_metadata(disk_name, metadata);
+    for (int i = 0; i < METADATA_SIZE; i += METADATA_ENTRY_SIZE) {
+        MetadataEntry* entry = (MetadataEntry*)&metadata[i];
+        if (entry->name[0] != '\0') 
+            printf("Name: %s, Size: %u bytes, Start: %u\n", entry->name, entry->size, entry->start);
+    }
+}
+
+void create_file(const char* disk_name, const char* name, unsigned int size) {
+    if (strlen(name) > 20) { printf("File name too long. Max 20 characters.\n"); return; }
+    char metadata[METADATA_SIZE]; read_metadata(disk_name, metadata);
+    unsigned int start = METADATA_SIZE;
+    for (int i = 0; i < METADATA_SIZE; i += METADATA_ENTRY_SIZE) {
+        MetadataEntry* entry = (MetadataEntry*)&metadata[i];
+        if (entry->name[0] == '\0') break;
+        if (strcmp(entry->name, name) == 0) { printf("File already exists.\n"); return; }
+        start = entry->start + entry->size;
+    }
+    if (start + size > DISK_SIZE) { printf("Not enough space on disk.\n"); return; }
+    for (int i = 0; i < METADATA_SIZE; i += METADATA_ENTRY_SIZE) {
+        MetadataEntry* entry = (MetadataEntry*)&metadata[i];
+        if (entry->name[0] == '\0') {
+            strcpy(entry->name, name); entry->size = size; entry->start = start;
+            write_metadata(disk_name, metadata);
+            FILE* disk = fopen(disk_name, "r+b");
+            char zero_buffer[size]; memset(zero_buffer, 0, size);
+            fseek(disk, start, SEEK_SET); fwrite(zero_buffer, sizeof(char), size, disk);
+            fclose(disk);
+            printf("File '%s' created.\n", name);
+            return;
+        }
+    }
+}
+
+void delete_file(const char* disk_name, const char* name) {
+    char metadata[METADATA_SIZE]; read_metadata(disk_name, metadata);
+    for (int i = 0; i < METADATA_SIZE; i += METADATA_ENTRY_SIZE) {
+        MetadataEntry* entry = (MetadataEntry*)&metadata[i];
+        if (strcmp(entry->name, name) == 0) {
+            unsigned int size = entry->size, start = entry->start;
+            memset(entry, 0, METADATA_ENTRY_SIZE); write_metadata(disk_name, metadata);
+            FILE* disk = fopen(disk_name, "r+b");
+            char zero_buffer[size]; memset(zero_buffer, 0, size);
+            fseek(disk, start, SEEK_SET); fwrite(zero_buffer, sizeof(char), size, disk);
+            fclose(disk);
+            printf("File '%s' deleted.\n", name);
+            return;
+        }
+    }
+    printf("File '%s' not found.\n", name);
+}
+
+void read_file(const char* disk_name, const char* name) {
+    char metadata[METADATA_SIZE]; read_metadata(disk_name, metadata);
+    for (int i = 0; i < METADATA_SIZE; i += METADATA_ENTRY_SIZE) {
+        MetadataEntry* entry = (MetadataEntry*)&metadata[i];
+        if (strcmp(entry->name, name) == 0) {
+            FILE* disk = fopen(disk_name, "rb");
+            char* content = malloc(entry->size + 1);
+            fseek(disk, entry->start, SEEK_SET); fread(content, sizeof(char), entry->size, disk);
+            content[entry->size] = '\0'; fclose(disk);
+            printf("Content of '%s':\n%s\n", name, content);
+            free(content);
+            return;
+        }
+    }
+    printf("File '%s' not found.\n", name);
+}
+
+void write_file(const char* disk_name, const char* name, const char* content) {
+    char metadata[METADATA_SIZE]; read_metadata(disk_name, metadata);
+    for (int i = 0; i < METADATA_SIZE; i += METADATA_ENTRY_SIZE) {
+        MetadataEntry* entry = (MetadataEntry*)&metadata[i];
+        if (strcmp(entry->name, name) == 0) {
+            if (strlen(content) > entry->size) 
+            { printf("Content size exceeds allocated space (%u bytes).\n", entry->size); return; }
+            FILE* disk = fopen(disk_name, "r+b");
+            fseek(disk, entry->start, SEEK_SET); fwrite(content, sizeof(char), strlen(content), disk);
+            fclose(disk);
+            printf("Content written to '%s'.\n", name);
+            return;
+        }
+    }
+    printf("File '%s' not found.\n", name);
+}
+
+int main() {
+    const char* disk_name = "virtual_disk.bin";
+    FILE* disk = fopen(disk_name, "rb");
+    if (!disk) {
+        disk = fopen(disk_name, "wb");
+        char zero_buffer[DISK_SIZE] = {0};
+        fwrite(zero_buffer, sizeof(char), DISK_SIZE, disk);
+        fclose(disk);
+        initialize_metadata(disk_name);
+    } else {
+        fclose(disk);
+    }
+
+    int choice;
+    while (1) {
+        printf("\nSimple File System Navigator\n");
+        printf("1. Create File\n2. Delete File\n3. Read File\n4. Write File\n");
+        printf("5. List Files\n6. Exit\nEnter your choice: ");
+        scanf("%d", &choice);
+
+        char name[21]; unsigned int size; char content[1024];
+        switch (choice) {
+            case 1:
+                printf("Enter the file name to create: ");
+                scanf("%20s", name);
+                printf("Enter the file size in bytes: ");
+                scanf("%u", &size);
+                create_file(disk_name, name, size);
+                break;
+            case 2:
+                printf("Enter the file name to delete: ");
+                scanf("%20s", name);
+                delete_file(disk_name, name);
+                break;
+            case 3:
+                printf("Enter the file name to read: ");
+                scanf("%20s", name);
+                read_file(disk_name, name);
+                break;
+            case 4:
+                printf("Enter the file name to write to: ");
+                scanf("%20s", name);
+                printf("Enter the content to write: ");
+                scanf(" %[^\n]s", content);
+                write_file(disk_name, name, content);
+                break;
+            case 5:
+                list_files(disk_name);
+                break;
+            case 6:
+                return 0;
+            default:
+                printf("Invalid choice. Please try again.\n");
+        }
+    }
+}
